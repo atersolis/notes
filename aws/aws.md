@@ -4,7 +4,11 @@ Notes and cheat sheets made while following [this udemy training](https://www.ud
 
 **RECOMMANDATION**: you should read AWS FAQ for RDS, VPC, EC2, NACLS vs. Security Groups, etc. 
 
+## Regions/Availability zones/edge locations
+
 **MISSING PART ABOUT REGIONS/AVAILABILITY ZONE**
+
+**The availabilty zone name are different from one account to the other**. This allow AWS to redistribute the resources more evenly (naturally people tend to pick more ften az-1a than az-1b).
 
 ## IAM (Identity and Access Management)
 
@@ -426,7 +430,7 @@ You can get instances (VMs) up and running in a few minutes.
 You have three type of pricing:
 
 - **On demand**: you pay for what you use
-- **Reserved**: you reserve instances for 1 or 3 years terms. Cheaper (up to 75% off). You get discounts if you pay upfront.
+- **Reserved**: you reserve instances for 1 or 3 years terms. Cheaper (up to 75% off). You get discounts if you pay upfront. You **cannot move a reserved instance to a different Region** (but you can change the AZ).
 - **Spot**: The instances price change depending on the demand. It can get really cheap if demand is low. You bid for your instance capacity. Usefull if you need very cheap compute resource with low constraint or if you have an urgent need for resources.
 - **Dedicated Hosts**: Dedicated physical instances. If you need to run special software, or have legal constraints.
 
@@ -489,6 +493,8 @@ The **EBS volume** is in **the same availability zone** as the **instance** it's
 Root EBS volume is deleted when the instance is terminated. By default, Additional volumes are not deleted when the instance is terminated. 
 
 Once created **you can extend** the size of an EBS volume and you can **change its type** (cold HDD can become Provisioned IOPS SSD). But it **takes time and affect performance**.
+
+>  As of Feb 2020 you can attach certain types of EBS volumes to multiple  EC2 instances.  https://aws.amazon.com/blogs/aws/new-multi-attach-for-provisioned-iops-io1-amazon-ebs-volumes/
 
 #### Snapshot
 
@@ -640,6 +646,8 @@ Then **all the commands** you launch **from the EC2 instance** will have the **p
 
 When you create an EC2 instance in the AWS console, at step 3, **you can write a bash script in the "User Data"** field, it's **launched at startup**.
 
+> I can **change the permissions of a role**, even if that **role is already assigned to an existing EC2 instance,** and these changes will take effect **immediately**. TRUE
+
 ### EC2 metadata
 
 **From the CLI of your instances** you can get **metadata** about the current EC2 instance:
@@ -705,6 +713,8 @@ AWS recommend using same instance type inside group.
 
 You can **move an instance in a placement group** if it's stopped (only through CLI or API for now).
 
+**Spread placement groups** have a specific limitation that you can only  have a **maximum of 7 running instances per Availability Zone** 
+
 ### HPC in AWS
 
 Overview of how to do High Performance Computing on AWS
@@ -756,4 +766,443 @@ Three behavior:
 Properties you can use in your rules: **Ip** address, **country** (POPULAR EXAM QUESTION: how do you block a country ?), **request** headers, regex match request, length of request, **presence of SQL**, **presence of script**
 
 **IN EXAM: how to filter requests ? WAF or Network ACLs**
+
+### Additional info from the QCM
+
+- You can add multiple volumes to an EC2 instance and then create your own  RAID 5/RAID 10/RAID 0 configurations using those volumes.
+
+## Databases
+
+### RDS - Relational Database Service
+
+**VM managed by AWS running a relational database. You cannot SSH into this VM**
+
+**Security patching of OS and DB is AWS responsability.**
+
+**RDS is not serverless except for Aurora serverless.**
+
+Manage many types of relational databases for you (**Postgresql, mysql, SQL, Oracle, Aurora, MariaDB**)
+
+Two key features :
+
+- **Multi AZ** (for resilience). If one fail, DNS address point to replica db automatically. The backup is in another AZ. **For disaster recovery only** not for performance. Available for every DB but Aurora (who don't need it, it's already fault tolerant). You can enable this in your RDS instance configuration.
+  - You **can force a failover** from one AZ to another by rebooting the RDS instance with failover.
+- **Read Replicas** - For Performance. **You can have 5 copies max**. They are in sync. Each replica has it's own DNS address so you need to configure your EC2 instances accordingly. They are called **Read replica** because you **read from multiple databases** but you **write** to **one only**.
+  - **You can have read replicas of read replicas (but it increase latency).**
+  - You can promote a read replica to an independant DB.
+  - This is **Asynchronous** replication (I think it means eventual consistency. There is **NO read after write consistency**). Perfect for read-heavy.
+  - Read replica are **not available for Microsoft SQL Server**.
+  - **Not** used for **disaster recovery (DR)**. 
+  - **YOU MUST ENABLE AUTOMATIC BACKUP TO ENABLE READ REPLICAS**. Then you can do actions > create replica.
+  - You can have **read replica in another region**.
+  - Your read replicas can have mulit A-Z
+  - **Data transfer** from your primary RDS instance to your secondary RDS instance **is free**
+
+You can create an Aurora replica (and then promote it to independant DB). Good way to migrate to Aurora.
+
+**Improve performance**: Read replica or Elasticache.
+
+**NO-SQL** database / no-relational database
+
+**Data warehousing**: Cognos, Jaspersoft, etc...
+
+**OLTP **(Online Transaction Processing): get data for your website ***vs*** **OLAP**(Online Analytics Processing): get stats for your back-office
+
+It's best to have a database for your website and another for stats, because computing stats => huge workload, might affect app performance. **That's what data warehousing is about**.
+
+Amazon has a special product for this: **Redshift**. It's a data warehouse service.
+
+**ElastiCache**: in memory cache, using Redis or Memcached
+
+**RDS** => OLTP
+
+**DynamoDB** => No SQL
+
+**Red Shift** => OLAP (Warehousing) for Business Intelligence or Data warehousing
+
+**Elasticache** => cache. Redis or Memcached. To speed up website and reduce workload database (cache frequent queries).
+
+
+
+⚠️ You need to **add the security group of your EC2 instance** in the **inbound rules** of the **security group of your RDS database.** ⚠️ **Otherwise your database is NOT accessible from your instances** (unless the database is public) :
+
+> MySQL/Aurora   TCP    3306     source: sg-myinstancesg
+
+RDS run on a VM, but you cannot log in these instances.
+
+**RDS** is **NOT serverless**, **EXCEPT** **Aurora Serverless**
+
+**Max 16TB for provisioned IOPS with a Microsoft SQL Server database engine**
+
+### RDS Backup
+
+- Automated backup: recover at any point of time. **Retention period: from 0 to 35 days max.**
+  - Full snapshot per day + transaction logs = can restore at any point of time down to a second
+  - **Enabled by default**
+  - **To disable backup you need to set retention period to 0 days** 
+  - backup data stored in S3
+  - You get **free storage** space equal to db size
+  - **Backup taken during defined window**. During that window db I/O might be suspended and latency elevated.
+  - Deleted when you delete your instance
+  - **Enabling Backup can cause some downtime**
+- Snapshots
+  - Done manually
+  - Stored even after you delete the db
+
+When you restore a db it will be a new RDS instance with new DNS address.
+
+**Encryption** at rest is supported for all six db engine (mysql, postgres, etc...) using KMS service. Backups, snapshot and replica are then also encrypted.
+
+### DynamoDB
+
+No SQL database
+
+-  stored on SSD Storage
+- Spread across 3 geographicaly distinct datacenters
+- Two consistency:
+  - **Eventual consistent (default)** - it takes usually **1second** for writes to affect all db
+  - **Strong consistency** (can be enabled) block reads until write applied. **Less than 1 sec**
+  - Remember the 1 sec rule, it might be an exam question
+
+DynamoDB, like serverless, can be very expensive at a certain scale. (**3340$ per month** for Aurora vs **39,995$ per month** for DynamoDB)[https://www.abhishek-tiwari.com/dynamodb-or-aurora/]
+
+### DynamoDB Advanced
+
+**DynamoDB Accelerator (DAX)**
+
+- It's a fully managed, highly available, **in-memory cache**
+- **10x performance** improvement
+- Reduce **requests** time from milliseconds to **microseconds**
+- Failover to other AZ
+
+Usually you have to create your own cache system, and invalidate cache when write or serve outdated data. You only get read performance improvements
+
+**DAX** is between the Application and DynamoDB and can respond in microseconds.
+
+DynamoDB support **transactions** (transaction take more read/write than traditionnal operations).
+
+**ON-DEMAND PRICING:**
+
+- **Pay-per-request** pricing
+- Balance cost and performance
+- No mimum capacity to purchase
+- No charge for idle tables
+- **BUT you pay more per request ** than provisioned capacity => **best for new products**
+
+**ON-DEMAND BACKUP AND RESTORE**
+
+- full backups at any time
+- Zero impact on table performance or availability
+- consistent within seconds and **retainted until deleted**
+- in the same region as the source table (can't restore across regions)
+
+**Point-in-Time Recovery (PITR)**
+
+- Proctects against accidental writes or deletes
+- Restore to any point in the last 35 days
+- Incremental backups
+- NOT ENABLED BY DEFAULT
+- Lastest restorable: five minutes in the past
+
+**STEAMS**
+
+- Time-ordered sequence of item-level changes in a table
+- stored for 24 hours
+- inserts, updates and deletes
+- stream-records have a stream number (their order) and are grouped in `Shards`
+
+**Use cases:**
+
+- Cross region duplication (global table). It uses streams to sync the tables
+- Messaging apps, notifications
+
+**GLOBAL TABLES**
+
+Global table sync your tables between multiple regions. You add your target regions and that's all
+
+- For globally distributed applications
+- Based on DynamoDB streams
+- Multi-regions redundancy for DR or HA
+- Replication latency under one second
+- Take some time to add a region to a global table
+
+**Database Migration Service (DMS)**
+
+Can be used to **migrate a database from an engine** (like mysql) **to another** (like dynamodb).
+The source database can be on-premise. DynamoDB is a valid destination but NOT an available source for this tool.
+
+**DynamoDB Security**
+
+- All user data is encrypted using KMS
+- Site-to-site VPN can be used
+- Direct Connect
+- IAM policies and roles are available for dynamodb
+- Fine-grained access (you can allow access to only certain fields in a table)
+- You can monitor dynamoDB with cloudwatch and cloudtrail
+- VPC endpoints
+
+### Redshift
+
+**Redshift** is a way to do **business intelligence and data warehousing**. You want a specific solution for data warehousing because to can be a real burden on your production database.
+
+- Single Node (160Gb)
+- Mult-node
+  - Leader node (manager client connections)
+  - computed node (store data and process queries)
+- Advanced compression: compress data by column (a lot easier to compress)
+- Don't need indexes or materialized views
+- Redshift scan the tables and chose the best compression scheme
+- **Massively parallel processing** (MPP)
+  - redshift distribute data and query load to your nodes
+  - you can easily add nodes
+- **Backup by default 1 day** (max 35 days)
+- **Maintain 3 copies of your data** (original + replica on compute nodes + backup on S3)
+- **Can also replicate your snapshots to S3 in another region for DR**
+- Priced by compute node hours (total number of hours you run across all your compute nodes). 1 unit/node/hour. Not charged for leader node. Charged for backup and data transfer
+- Security
+  - Encrypted in transit using SSL
+  - Encrypted at rest using AES-256
+  - By default, redshift takes care of key management (but you can manage your own keys through HSM or KMS)
+- **Currently only in one availability zone**. No multi AZ
+- Cannot restore to other AZ
+
+### Aurora
+
+Aurora is Amazon proprietary database. It's MySQL and Postgresql compatible.
+After some research it seems that Aurora is not really that much more expensive and have a lot of befenits.
+
+Performance 5x better than mysql and 3x better than postgresql, at much lower price point.
+
+- Start with 10GB, scales in 10GB to 64TB (auto-scaling)
+- Compute resources can scale up to 32vCPU and 244GB memory
+- **2 copies of your data is contained in each availability zone, with minimum of 3 availability zones. 6 COPIES OF YOUR DATA**
+
+**Scaling**
+
+- Aurora is designed to handled **loss of 2 copies** of your data, **without** affecting **write performance**, and the **loss of 3 copies for read performance**.
+- Storage is self-healing (autoscanning for errors and repaired automatically).
+- **Three types of Aurora read replicas** are available: Aurora (15 available/database), MySQL Read Replicas (5 / database), PostgresQL (1 / database). It seems best to use Aurora unless you want high-flexibility. For instance sync take a few milliseconds, low performance impact on primary, **automated failover (only available for Aurora)**.
+
+**Backups**
+
+- **Enabled by default**
+
+- **Automated backups have no performance impact !** Snapshots have no impact either.
+- **you can SHARE AURORA SNAPSHOTS with other AWS accounts**
+
+**AURORA SERVERLESS:**
+
+- On-demand pricing: you pay per request
+- Auto-scaling - very easy to setup
+
+- Perfect for **small website**,  (infrequent, intermittent or upredictable workloads).
+- Otherwise it's better to use Aurora (cheaper).
+
+### Elasticache
+
+A service that manage **in-memory cache** system like **redis** or **memcached**.
+
+When to use redis or memcached
+
+- **Memcached** is simple, **multi-threaded**, has **horizontal scaling**, but not lot of features. Best for simple, performant cache. Simple to get started.
+- **Redis** feature-complete but **single-threaded**. It has **multi-AZ** support, you can persist to disk, you have pub/sub capibilities, advanced data types, ranking/sorting data types. **Backup and restores**.
+
+**Elasticache increase database and web app performance.**
+
+### Database Migration Service (DMS)
+
+DMS is a cloud service that makes it easy to migrate realtional databases, data warehouses, NoSQL databases and other types of data stores.
+
+You can migrate from AWS to AWS, on-premise to AWS, AWS to on-premise, on-premise to on-premise.
+
+AWS DMS is a server in AWS Cloud. You tell DMS the source, the target and you schedule the operation.
+
+You can pre-create the target tables manually, or you can use **AWS Schema Conversion Tool (SCT)** to create some or all of the tables, indexes, views, triggers, etc...
+
+**Two types of migrations** supported by AWS DMS:
+
+- **Homogenous **migrations: engine **A** to engine **A** (ex: mysql --> mysql)
+- **Heterogenous** migrations: engine **A** to engine **B** (ex: SQL --> Amazon Aurora)
+
+**Source**: Orable, Microsoft SQL Server, Mysql, MariaDB, postgresql, SAP, mongodb, db2; **AzureSQL**, **Amazon RDS (including Aurora)**, AWS S3
+
+**Target**: Oracle, Microsoft SQL Server, MySQL, MariaDB, postgresQL, SAP, RDS, Redshift, DynamoDB, S3, Elasticsearch service, Kinesis Data Streams, DocumentDB
+
+For **Homogenous** migrations: You can for instance run DMS on a EC2 instance, pull data from on-premise and put it on RDS
+
+For **Heterogenous** migrations: You need to run **both** **DMS** and **AWS Schema Conversion Tool** (SCT) on the EC2 instance
+
+### Caching services
+
+The following services have caching capabilities
+
+- **Cloudfront**: Caching HTTP responses from your origin on Edge locations (closests to the user). Low latency
+- **API Gateway**: if cache miss on cloudFront, then request go through API Gateway before reaching Lambda. Second best latency
+- **ElastiCache** - memcached and redis: If cache miss on API Gateway, then lambda call elastiCache. Third best latency.
+- **DynamoDB Accelerator (DAX)**: lambda can also get data from DynamoDB, and them it would access DAX cache. Similar latency with elatiCache.
+
+These four service create a stack, and you want to put as much data on the first layers, because it has lower lantency.
+
+### Elastic Map-Reduce
+
+**EMR is used for big data processing**
+
+- The industry-leading cloud big data platform for processing vast amounts of data using open-source tools such as Apache Spark, Apache Hive, Flink, Hudi, Presto, and so on.
+- Petabyte-scale analysis
+- half-cost, 3x the speed of traditional Apache Spark
+- It's a **cluster** of E2 instances, called "**node**". Each node has a role, a **node type**:
+  - **Master node**: manage the cluster. Monitor health, and sub-task progression. **Each cluster must have one.**
+  - **Core node**: run tasks and **store data** in HDFS (Hadoop Distributed File System). **At least one**.
+  - **Task node**: only run tasks but **does not store data (optional)**.
+- Nodes can communicate with each other.
+- Log data on master node, if you lose your master node (at /mnt/var/log), you might lose your data. **So you can periodically archive the log files stored on the master node to Amazon S3**. **Default 5min interval**. **YOU NEED TO SETUP THIS WHEN YOU CREATE THE CLUSTER** (you can't after).
+
+## Advanced IAM
+
+### AWS Directory Service
+
+So this part is a bit confusing because AWS gather some unrelated services under one name: Directory Service. But actually, Cloud Directory has nothing to do with Microsoft AD for instance.
+
+Many companies use AD users to authenticate their employees. They want their employees to login once with AD, and use multiple services. You can have group policies. Azure directory users LDAP and DNS.  Support Kerberos, LDAP  and NTLM anthentication. Highly avaiable.
+
+- AWS Directory service is a family of services
+- Connect AWS resources with on-premise Active Directory
+- Standalone directory in the cloud
+- You can use those AD account to login to AWS console.
+
+Three services: **AWS Managed Microsoft AD**, **Simple AD**, **AD Connector**
+
+**TODO**: understand this part better
+
+#### AWS managed Microsoft AD DC (Domain controller)
+
+ managed microsoft servers running AD. You want multi servers in multiples AZ. Each group of domain controller is in its own VPC.
+
+You can extend existing AD to on-premises using AD Trust.
+
+**What AWS manage for you:**
+
+- Multi-AZ deployment
+- patch, montor, recover DC
+- Instance rotation (update software)
+- snapshot and restore
+
+**What you need to manage:**
+
+- users, groups, GPOs
+- Standard AD tools
+- Scale out DCs
+- Trusts (resource forest)
+- Certificate authorities (LDAPS)
+- Federation
+
+#### Simple AD
+
+- standalone managed directory
+- basic AD features
+- small: <= 500; large <= 5,000 users
+- Make it easier to manage EC2 when you want to use your existing corporate credentials
+- Can't join on-premises AD
+
+#### AD Connector
+
+- Proxy for on-premises AD
+- Avoid caching information in the cloud
+- Allow on-premises users to log in to AWS using AD
+- Join EC2 instances to your existing AD domain
+- Scale across multiple AD Connectors
+
+#### Cloud Directory (not AD compatible)
+
+Not AD compatible
+
+- Directory-based store for developers
+- multiple hierarchies with hundreds of millions of objects
+- Use cases: org charts, course catalogs, device, registries
+- Fully managed service
+
+#### Amazon cognito user pools
+
+Not AD compatible
+
+### IAM Policies
+
+#### ARN - Amazon Resource Name
+
+**A unique identifier for AWS resources**
+
+All arn begin with `arn:partition:service:region:account_id:` (some parts can be omitted, like region if global resource)  and end with `resource` or `resource_type/resource` or `resource_type/resource/qualifier` (`/` can also be `:`).
+
+Ex `arn:aws:dynamodb:eu-central-1:123456789012:table/orders` or `arn:aws:s3:::mybucket/image.png`
+
+partition: aws has multiple infrastucture (ex: aws, the most common, vs aws-cn for china)
+
+You can use wildcards to describe multiple resources:
+`arn:aws:ec2:us-east-1:123456789012:instance/*`
+
+#### IAM Policies
+
+JSON document that define permissions. It's composed of:
+
+- Identity policy. A policy you attach to a IAM user, group or role
+- Resource policy. A policy you attach to a resource, like a S3 bucket.
+- No effect until attached
+- **List of statements**
+- Each statement match an AWS API request (an action you perform in aws, like delete `mys3bucket`)
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "HumanReadblePolicyId",
+      "Effect": "Allow", // Or "Deny",
+      "Action": ["dynamodb:Query", "dynamodb:Get*"], // what we allow, or deny
+      "Resource": "arn:aws:dynamodb:*:*:table/users" // the target of the policy
+    }
+  ]
+}
+```
+
+- **AWS managed policies**: pre-created policies by aws (cannot be edited)
+- **Customer managed policies**: created by you. You can create your own policies by writing json like above.
+
+**Example**: You want to give your EC2 instance access to a specific bucket called test. You create a policy called TestBucketPolicy, then you create a TestBucketRole role with this policy and you assign this role to your EC2 instance.
+
+**Inline policy**: you create a policy inside a role for instance, and it's not available outside that role, so you cannot re-use it.
+
+- **EVERYTHING NOT EXPLICITLY ALLOWED IS FORBIDDEN**
+- **If you deny something, it override any allow rule you might have**
+- Only attached policies have an effect
+- AWS joins all applicable policies (if you have a role with multiple policies)
+
+#### Permission boundaries
+
+- Used to delegate administration to other users
+- Set the maximum permissions of an user. **Prevent privilege escalation** or **unnecessarily broad permissions**
+- Use cases:
+  - Developers creating roles for Lambda functions
+  - Applications owners creating roles for EC2 instances
+
+So if you have an user with AdministratorAccess permission access (give access to everything) but then give him an AmazonDynamoDBFullAccess permission boundary, he will only have access to dynamoDB.
+
+### AWS Resource Access Manager (RAM)
+
+Before we've talk about how you can create multiple root account and connect them to create an AWS organisation.
+
+**RAM allows resource sharing between accounts**. Only a few services support this however: App Mesh, Aurora, CodeBuild, EC2, EC2 Image Builder, License Manager, Resource Groups, Route 53
+
+So if you want to share a resource, you go in RAM service, you select the resource you want to share, then you type the id of the account you want to share it with. It will send an invitation. **You must accept the invitation in the console in the RAM service** !
+
+### AWS Single Sign-On (SSO)
+
+So you've spread your AWS resources into different AWS accounts for security reasons, but now you have to login in the right account everytime you want to do an action. If you have many account it's a pain.
+
+You can you SSO to log-in once and access all the accounts you're allowed to access.
+
+This can **integrate with external services** (ie: you can log in G suite or Office 365 with your AWS SSO), so you can use your existing corporate credentials. You can get your AWS SSO credentials from On-premise **Microsoft AD**. You can also use your AWS SSO credentials to  log in **SAML 2.0-enabled applications.**
+
+All login through AWS SSO is recorded in CloudTrail
+
+**YOU PROBABLY WON'T NEED MOST OF WHAT'S COVERED IN ADVANCED IAM, BUT IT'S WORTH A NUMBER OF POINTS IN THE EXAM**
 
