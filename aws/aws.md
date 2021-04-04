@@ -1206,3 +1206,434 @@ All login through AWS SSO is recorded in CloudTrail
 
 **YOU PROBABLY WON'T NEED MOST OF WHAT'S COVERED IN ADVANCED IAM, BUT IT'S WORTH A NUMBER OF POINTS IN THE EXAM**
 
+## Route 53
+
+**By default you are limited to 50 domain names.** You can increase the limit by contacting AWS.
+
+### DNS - Domain Name System
+
+**IPv4** -> 2^32 addresses, **IPv6** -> 2^128 addresses
+
+**Top Level Domain**: .com, .gov, etc... Controlled by IANA (Internet Assigned Numbers Authority). [http://www.iana.org/domains/root/db](http://www.iana.org/domains/root/db)
+
+Domains are **registered** with **InterNIC**, a service of **ICANN**, which enforces uniqueness of domain names across the Internet. Each domain name registered in a central database know as the **WhoIs** database.
+
+A DNS domains contains the **Start of Authority Record** (SOA record) which in turn contains:
+
+- The name of the server that supplied the data for the zone
+- The administrator of the zone
+- The current version of the data file
+- The default number of seconds for the **time-to-live** file on resource  records
+
+**Name Server Records** (NS records): Used by Top Level Domain servers to direct traffic to the Content DNS server. Ex: example.com,  record type: NS, value: ns1.exampleserver.com, TTL: 21600
+
+**TTL** (time-to-live): how long DNS answer is cache. (Ex, for A records, how long the returned IP for a domain should be cached).
+
+**Multiple types of record**:
+
+- **"A" record** (Address record): translate domain to IP. You can put multiple IPs (with AWS, one is picked randomly, good for load balancing)
+- **"CName" record** (canonical name record): translate domain to other domain. **CNAME cannot point to naked domains name** or **zone apex** (~= second level domain. example.com = naked domain, www.example.com != naked domain). Ex: `foo.example.com` points to `bar.example.net`. In that case you resolve `foo.example.com`, it returns `bar.example.net`. Then you resolve `bar.example.net` and it returns an IP.
+- **Alias record**: Like CNAME, but without the limitation for naked domain. You resolve `foo.example.com`, but then the DNS server will resolve `bar.example.net` for you and returns directly the IP. So it's faster. However you will lose the geographic location of the user in the process.
+
+The difference between CNAME record and Alias record is detailed here: [https://help.ns1.com/hc/en-us/articles/360017511293-What-is-the-difference-between-CNAME-and-ALIAS-records-](https://help.ns1.com/hc/en-us/articles/360017511293-What-is-the-difference-between-CNAME-and-ALIAS-records-)
+
+**TIPS:**
+
+- **Elastic load balancers** (ELBs) don't have an IPV4 by default, only a DNS name
+- You must understand the difference between an Alias Record and a CNAME record.
+- **Always chose Alias when given the choice**
+
+**Common DNS types:**
+
+- SOA records
+- NS records
+- A Records
+- CNAMES records
+- MX records for mails
+- PTR Records: the inverse of A record (you have the IP and you want the domain)
+
+**Some practical tips:**
+
+- You can buy a domain name in AWS route 53
+
+- A domain registration can take up to 3 days, but usually 1 or 2 hours
+
+### Route policies
+
+Many types of routing policies with Route53
+
+- simple routing
+- weighted routing
+- latency-based routing
+- failover routing
+- Geolocation routing
+- Geoproximity routing (traffic flow only)
+- Multivalue answer routing
+
+#### Simple routing
+
+Simple routing is a **A record**, with **potentially multiple IP addresses**. When the address is resolved, **one IP address** is picked **randomly** amongst the listed IP addresses.
+
+#### Weighted Routing Policy
+
+You can assign a weight to each IP address. Ex: you can ask AWS to redirect 20% of DNS requests to IP "30.0.0.1" and 80% to IP "30.0.0.2". (Sounds great for A/B testing).
+
+You need to create one **A record per weight with one IP only**. Then you select "Weighted routing" in policy, you chose a **weight**. You must also type a **setId**, to tell AWS the records are related. The percent of traffic redirect to that record is `(record weight / sum of record weight having the same setId) * 100`
+
+Interesting option: Association with Health Check. If pointed resource fail health check, ignore it in DNS record
+
+**Health Checks**: In route53 you can create a health check. It will send an HTTP query every 30 seconds (or 10 seconds) to an IP of your choice. If the query fails multiple times (you can configure the exact number), the tested server will be considered down and the health check will fail. You can get a notification if the test fail.
+
+#### Latency-based routing
+
+Will resolve the domain to the server with the lowest latency for the user (so probably the closest to the user, but not always). If you have a example.com domain with a server A in France and a server B in japan, a user in Japan will be redirected to server B and a user in France to server A.
+
+For each server, you must indicate to AWS in which region it's located so that AWS can know the latency. Like for weighted routing policy, you also need to indicate a `setId`.
+
+#### Failover routing
+
+If one server fail, we have a fallback server. The default server is called "active", the backup server is called "passive".
+
+#### Geolocation routing
+
+Everything is in the title.
+
+#### Geoproximity Routing
+
+**DON'T CONFUSE THIS WITH GEOLOCATION ROUTING**, IT'S DIFFERENT
+
+Don't seem very useful in practice.
+
+It's beyond the scope of the Certified Solutions Architect Associate exam. You need to enable traffic flow to use this. Basically you can associate coordinates (lat, long) and a bias (a coefficient giving a weight to the location) with a server. The users will be routed to the server associated with the closest coordinate. The calculated distance is affected by the bias.
+
+**Traffic flow**: Amazon has a visual diagram editor to manipulate DNS rules. It's used to create complex rules. It's best to avoid using it unless you really need it because it costs : `$50.00 per policy record / month`. Outch.
+
+#### Multivalue answer policy
+
+Like simple routing, however you can put health checks on every server, and only servers that pass health check are taken into accounts.
+
+## VPC
+
+Probably the most important part of the exam
+
+From aws doc:
+
+![VPC overview](https://docs.aws.amazon.com/vpc/latest/userguide/images/nat-gateway-diagram.png)
+
+Another I found from [here](https://medium.com/an-idea/create-a-secure-aws-vpc-architecture-fd4aeb0f0b25). It was also in the slide of the udemy course.
+![VPC security](https://miro.medium.com/max/1400/1*bGOy-meClkVOmcQGX8V-kw.png)
+
+A subnet is a range of local IP addresses. You usually have a public one, with your backend, and a private one with your database. It's in the same VPC so every instance in the public subnet has access to the database in the private on, but it's not accessible from internet.
+
+An ip range is represented like this : 10.0.0.0 / 16. In that case 10.0 is the prefix of all your ips. 16 mean that the 16 first bits are the prefix, their are fixed. So in that case the range is 10.0.0.0 to 10.0.255.254. That gives you around 2^16. **16 is the minimum number of prefix bits** (so you can have around 65 000 IPs in that subnet) and **28 is the maximum** (in that case you get 16 IPs in your subnet).
+
+These ranges are called **CIDR**. Use [CIDR.xyz](https://cidr.xyz/) to visualize and understand better what I mean.
+
+**There is a default VPC: All subnets are public in that VPC.**
+
+Each EC2 instance has both a public and private IP address.
+
+You can do **VPC peering** : you connect two VPC. It's like instances are on the same private network.
+
+You can peer VPC's with other AWS accounts. You can peer across regions. **No transitive peering !**
+
+**Transitive peering**: If VPC A is peered to VPC B and VPC B to VPC C, VPC A is not peered with VPC C (it can't talked to instances inside VPC C)
+
+- **VPC = a logical datacenter in AWS**
+- Consists of IGW (Or Virtual Private Gateways), Route Tables, Network Access Control Lists, Subnets, and Security Groups
+
+- **1 subnet is in one Availability zone only**, but you can have multiple subnets in one availability zone.
+
+- **Security Groups are Stateful; Network Access Control Lists are Stateless**
+
+#### Creating a VPC
+
+**When you create a VPC it automatically create:** a **Route Table**, a **Network ACL**, and a **Security Group**. It does **NOT** create a **subnet**, it does **NOT** create an **internet gateway**.
+
+**In order to use the VPC we need to create a subnet.**
+
+**When you create a subnet, 5 ip address are reserved**: Network IP (10.0.0.0), VPC Router (10.0.0.1),  DNS Server (10.0.0.2), Reserved by AWS for future use (10.0.0.3), Broadcast IP (10.0.0.255).
+
+**By default**, our subnet are **private**. You can enable **public IPv4 auto-assign** (actions => Modify auto-assign IP settings).
+
+Then you need to create an **internet gateway**. By default, it's dettached. You can attach it to a VPC (actions > Attach).
+
+**You can only have ONE internet gateway per VPC**.
+
+Now we need to route the traffic with **routing table.**
+
+By default the route table **allow all communication from inside VPC** to inside VPC, by **NOT from internet**.
+
+You have one **main route table** per VPC. **By default subnets use this main route table.**
+
+If we modify our main route table to allow communication with internet, it would affect all the subnets of our VPC. That's a security concern.
+
+**So we want to create a route table for our public subnet.**
+
+So we need to create a new route in PublicRoute table, with the following parameters:
+
+- 0.0.0.0/0 allow traffic from all IPv4 addresses
+- We select our internet gateway as the target.
+
+**The finally we need to associate our public subnet to our PublicRoute** (Select the route table, subnet assocation tab)
+
+**Security groups belong to one VPC. You cannot use the security group from one VPC in another VPC**
+
+#### Communication between subnets
+
+##### Allow communication between security groups
+
+**By default, security groups do not allow access from instances inside other security groups.**
+
+**So what you want to do is editing the security group of your private instances and allow traffic from your public instances.** Just allow ip addresses ranges: 
+
+Example: All ICMP (allow ping)     TCP    source: 10.0.1.0/24
+
+#### Communication with outside world (NAT instances & NAT gateways)
+
+ **⚠️ By default the instances in your private subnet don't have access to internet !** 
+
+So you can't download updates or anything.
+
+NAT: Network Address Translation.
+
+**Most of time you would use NAT gateways** (but sometimes you might you NAT instances).
+
+A **NAT instance is an EC2 instance** with a special AMI, **inside your public subnet**.
+
+By default all instances have a "source and destination check". It's meaning all traffic from and to the instance must have the instance IP as the source or the destination. We need to disable that for the NAT instance.
+
+Then you need to create a route so that the private instance can talk to the NAT instance: Destination 0.0.0.0/0  target: NAT_instance
+
+The problem with this is that if the NAT instance crash or is overwhelmed, all the instances using.
+
+**So NAT instance = bottleneck + single point of failure**
+
+Of course you could create Autoscaling groups, mulitple subnets in different Azs and a script to automate failover, but It's **better** to use a **NAT Gateway**
+
+You create your **NAT Gateway** in your public subnet
+
+**You create a route in your Route Table**. **We want all traffic with as destination any IP address to go through our NAT gateway, which has access to internet**.
+
+NAT gateway are:
+
+- redundant inside AZ
+- cannot span multiple AZ (one NAT gateway = one AZ)
+- able to handle 5gps and scale to 45gpbs
+- no need for patch
+- not associated with security group
+- automatically assigned a public ip address
+- no need to disable source/destination checks
+
+**You should create one NAT gateway per AZ**
+
+### Network Access Control Lists (NACL)
+
+NACL is a bit like Security groups, it a kind of firewall. The difference is that you can have **allow rules** and **deny rules**.
+
+When you create a NACL, it's going to **deny everything by default**.
+
+If you associate a subnet to your new NACL, it's going to remove your subnet from it's previous NACL because **subnets can only have ONE NACL**
+
+When you add a rule, it's recommanded to add +100 to the rule number. This gives you space to add morme rules between to rules. 
+
+Another **important difference with security group**: If you add an **inbound rule**, you also need to add an **outbound rule**. The **traffic is not going to be allowed to go out automatically like with security group**.
+
+⚠️ In the outbound rules, **the port is the DESTINATION port, not the SOURCE port** !
+
+Therefore we need to allow the range of **Ephemeral port** (1024-65535).
+
+Basically, when a client connects to an HTTP server, it connects to port 80, but the HTTP server send the response to a random **Ephemeral port** (between 1024 and 65535).
+
+⚠️ You also need to allow **Ephemeral ports** in **inbound** rules if you want your server to be able to make an  HTTP request to another server, because is time your serveur will be the client, and will receive the HTTP response on an ephemeral ports.
+
+⚠️ **Rules with a higher rule number are overwritten by rules with lower rule number.**
+
+So this means rule 100 overwrite rule 300.
+
+**When you create a subnet, it will use the default NACL or the VPC.** 
+
+**Summary**:
+
+- VPC has default NACL allow all outbound and inound traffic
+- You can create custom NACL, which by default denies all inbound and outbound traffic.
+- Each subnet in your VPC must be associated with one NACL, and only one.
+- By default, the subnet use the VPC's default NACL
+- You can block specific IP using NACL, but not with security groups
+- A NACL can have many subnet, but a subnet has only one NACL
+- The rules with the lower rule number overwrite those with the higher rule number (100 overwrite 300)
+- Each rule can allow or deny traffic
+- NACL are stateless: responses to allowed inbound traffic are subject to the rules for outbound traffic (and vice versa).
+
+### Custom VPC and ELB
+
+You need to put the load balancer in a public subnet
+
+**YOU NEED TWO PUBLIC SUBNETS FOR LOAD BALANCERS**
+
+### VPC flow logs
+
+Flow logs is a way to capture information about the IP traffic going to and from network interfaces in your VPC.
+
+You can capture traffic at **VPC level, subnet level or network interface level**.
+
+Select VPC, actions => create flow log
+
+You can chose to log **accepted traffic, rejected traffic or both**
+
+You can send the logs to CloudWatch or to S3.
+
+If you select CloudWatch you need to **create a log group**. You also need a role. You can click on "setup permission" to ask AWS to help you create the role.
+
+- You can only enable flow logs for VPC that are in your account.
+
+- You can tab flow logs.
+
+- After you created a flow log you cannot change its configuration.
+- Not all traffic is logged. Here is a list of what is **NOT LOGGED**:
+  - traffic when instances access Amazon DNS server.
+  - traffic for Amazon Windows license activation
+  - traffic for 169.254.169.254 for instance metadata
+  - DHCP traffic
+  - traffic to the reserved IP address for the default VPC router (ex: 10.0.0.0)
+
+### Bastion Hosts
+
+A bastion server is in the public subnet and is basically used as a proxy to SSH into an instance in the private subnet from the internet. It's meant to be exposed to untrusted traffic and used as a kind of guard. It need to be hardened and secured as much as possible.
+
+- NAT Gateway or NAT instance is used to provide internet traffic to private EC2 instances.
+- A Bastillon is used to securely administer EC2 instances (Using SSH or RDP). (also called Jump boxes in Australia)
+- You cannot use a NAT Gateway as a Bastion host
+
+So basically you need to create an EC2 instance with an Bastion AMI from the community in your public subnet.
+
+### Direct connect
+
+Help to etablish a dedicated network connection from your premises to AWS.
+
+![Direct connect diagram](https://miro.medium.com/max/1400/1*Bf1CjyOKPeiybahOjCOMSg.png)
+
+Taken from [this article](https://medium.com/awesome-cloud/aws-direct-connect-overview-introduction-db468ae6a582).
+
+**What you need to remember for the exam:**
+
+- Direct Connect connects your data center to AWS
+- Useful for high throughput workloads (ie lots of network traffic).
+- Or if you need a stable and reliable secure connection.
+
+If you have scenario based question where asked what you can do when to VPC connection that keeps drop-out because of the high throughput, the answer is Direct Connect.
+
+Apparently now you need to know the step to create a Direct Connect connection for the exam. Here is the video on [youtube](https://www.youtube.com/watch?v=dhpTTT6V1So)
+
+**TODO: learn those steps.**
+
+### Global accelerator
+
+It works much like S3 transfer acceleration. It's explained [here](https://aws.amazon.com/global-accelerator).
+
+Regular connection to EC2 instance from client on internet:
+
+![internet traffic](https://d1.awsstatic.com/r2018/b/ubiquity/global-accelerator-before.46be83fdc7c630457bba963c7dc928cb676d9046.png)
+
+And through Global accelerator:
+
+![](https://d1.awsstatic.com/r2018/b/ubiquity/global-accelerator-after.2e404ac7f998e501219f2614bc048bb9c01f46d4.png)
+
+Your client connect to the closest Edge location which act as a proxy and transfer the traffic through AWS private, optimised network.
+
+1. Global accelerator procides you with **two static IP addresses** (you can also chose your own) that you associate with your accelerator
+2. your accelerator direct traffic to optimal endpoints over the AWS global network. Each accelerator includes one or more listeners.
+3. Your accelerator has a DNS address like a1234567890abcdef.awsglobalaccelerator.com. That points to the static Ip addresses that Global Accelerator assigns to you. You can use the IP, that DNS address or your own domain.
+4. Network zone is a set of physical infrastructure. It's like an availability zone but for network. Each of the two static IP points to a different network zone. If one IP is unhealthy, it falls back to the second and thus the other isolated network zone.
+5. Listener processes inbound connections from clients to Global Accelerator. Supports both TCP and UDP.
+6. Endpoint group : associated with a specific AWS Region. End group include one or more endpoints in the Region. You can specify the percent of traffic going to a endpoint group. these percent are called **traffic dials**
+7. Endpoints: EC2 instance, loadbalance. You can configure weights to determine the percent of traffic directed to a particular endpoint.
+
+### VPC endpoints
+
+**Problematic**: you have a EC2 instance in your private subnet. You want it to access one of your S3 buckets.
+
+You have two ways to do this:
+
+- Using NAT gateway (or NAT instance). The problem with this method is that your traffic will go through internet.
+- The second option is to use **VPC endpoints**. The traffic will stay on the private network.
+
+So **VPC endpoint** enables you to privately connect your VPC to supported AWS services **without going through the internet** with internet gateway, NAT gateway, etc... This way, the instances in your VPC don't need a public IP address to communicate with the AWS service. The traffic don't leave the AWS network.
+
+VPC endpoint are virtual device. They are horizontally scaled, redundant, and highly available.
+
+**Two types of endpoints:**
+
+- **Interface endpoint**s: It's an elastic network interface with a private IP address that serves as an entry point for traffic desitned to a supported service. **A LOT of services are supported**. You attach this ENI to your EC2 instance and it will allow you to communicate with these services. You are charged per hour and per GB processed.
+- **Gateway endpoints**: Supported only for **S3** and **Dynamodb**. Gateway endpoints are cheaper.
+
+So can you **create an endpoint in your VPC**: you select the **service** (S3 in our case) in the service list, you select your VPC, you select your Route Table and finally you can configure an endpoint policy.
+
+When you create the endpoint, it will create a Route in your Route Table. But it can takes 5min before it appears.
+
+⚠️ if when you try to access your S3 bucket from the instance, it times out, it's because **you need to add the --region parameter**.
+
+```bash
+aws s3 ls #times-out
+aws s3 ls --region us-east-2 # that works
+```
+
+
+
+### AWS PrivateLink
+
+We want to open our applications up to other VPC. Two options:
+
+- Open the VPC to internet => security issues
+- VPC peering => If you want to share your VPC to many VPC you will have many peering relationships to manage. Also the whole network will be accessible.
+
+So aws created PrivateLink.
+
+Expose your service inside a VPC to an other VPC without making it available on internet.
+
+- Best way to share your service with teens, hundreds or thousands of customer VPC
+- No VPC peering, route tables, or NAT, IGWs required
+- But: **Requires** a **Network Load Balancer on the service VPC** and an **ENI on the customer VPC**
+
+### AWS Transit Gateway
+
+Transit gateway allow you to simplify your network architecture. The transit gateway acts like a giant hub.
+
+![Without transit gateway](https://d1.awsstatic.com/product-marketing/transit-gateway/tgw-before.7f287b3bf00bbc4fbdeadef3c8d5910374aec963.png)
+
+![with transit gateway](https://d1.awsstatic.com/product-marketing/transit-gateway/tgw-after.d85d3e2cb67fd2ed1a3be645d443e9f5910409fd.png)
+
+- Allows you o have transitive peering between thousands of VPCs and on-premises data centers.
+- Works on a hub-and-spoke model
+- Works on a regional basis, but you can have it across multiple regions
+- You can use it across multiple AWS accounts using RAM (Resource Access Manager)
+- You can use route tables to limit how VPCs talk to one another
+- Works with Direct Connect as well as VPN connections
+- Supports **IP multicast** (not supported by any other AWS service)
+
+### AWS VPN CloudHub
+
+Allow you to have a single VPN gateway for multiple private networks outside of AWS.
+
+![aws vpn CloudHub](https://docs.aws.amazon.com/vpn/latest/s2svpn/images/AWS_VPN_CloudHub-diagram.png)
+
+- If you have multiple sites, each with its own VPN connection , you can use AWS VPN CloudHub to connect those sites together.
+- Hub-and-spoke model
+- Low cost; easy to manage.
+- It operates over the public internet, but all traffic between the customer gateway and the AWS VPN CloudHub is encrypted.
+
+### Networking Costs
+
+The **traffic** coming in **from the internet to your VPC is FREE**.
+
+The **traffic between two instances in the same AZ is free** if you use the **private IPs**.
+
+If you use the **public IPs, the traffic will go through the internet**, and thus it's **NOT FREE** (something like 0.02$/GB for instance (not real price, it's an example)).
+
+The traffic between two instances in different AZ but within the same region is **NOT FREE**. But it's **cheaper than going through the internet**.
+
+Finally traffic between regions is **NOT FREE**. It's more expensive than traffic between AZ, and cheaper than traffic through the internet.
+
+- Use private IP addresses over public IP addresses to save money. It uses AWS own network rather than internet.
+- If you want to minimize your network costs, put all of your EC2 instances in the same AZ. However that's a single point of failure, something you want to avoid.
+
