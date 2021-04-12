@@ -110,13 +110,35 @@ aws iam list-groups
 
 
 
-## Set an billing alarm with cloudwatch
+## ~~Set an billing alarm with cloudwatch~~ Use aws budget instead
 
-You can create a billing almart so that you receive an email as soon as your monthly bill go beyond a certain amount. It's really helpfull if you forgot you had that expensive EC2 instance running, or if you underestimated the pricing of an AWS service.
+⚠️ **THAT'S PROBABLY A BAD IDEA TO USE BILLING ALARMS, USE AWS BUDGET INSTEAD** 
 
-For that search for **cloudwatch**, then in the left menu **alarms > billing** and then **create alarm**. Enter an amount at the bottom of  the page, check "create new topic (SNS)" in the next page, enter your email, on the next page enter name and description, then on the last page click create alarm and you're good. The alarm my be in "**insufficient data**" category. If you just created your account and are in free tier, **that's normal.**
+In the lecture from cloud guru they advise you to create a billing alarm in CloudWatch, but that's probably a bad/outdated advice, for the following reasons:
 
-You can create folders in your S3 bucket.
+- **In my case the alarm was never triggered**. I set an alarm at 1eur but I currently need to pay 3.2$. The cause : I have a INSUFFICIENT_DATA error on my alarm even though I created it a month ago. After some research, it seems that even though I created all my resources in the Paris region, the billing data in Cloudwatch is not in the Paris Region, but in the Virginia Region (makes no sense to me). So I should have created the billing alarm in us-east-1 (Virginia). (However I tried later to create the alarm in the us-east-1 region and I still couldn't see any data on the chart...). **So basically billing alarms can be tricky. AWS budgets are much easier and safer to use.**
+- **AWS budget has more powerful features, like previsional costs, etc...**
+  - You can also **trigger actions when your budget is reached**, like **stopping EC2 instances**.
+
+### Create a budget
+
+So in order to create an AWS budget you need to go to use the [**Billing service**](https://console.aws.amazon.com/billing). Then you click on "Budgets" on the left menu. Then click on ""create a budget" and select "cost budget" on the next screen. The remaining steps are straight-forward.
+
+### Change billing currency
+
+You can change the currency for your bills. By default it's dollar, but you can change it to euros for instance.
+
+MyAccount >> Payment Currency Preference >> Edit
+
+
+
+*Outdated notes from when I used billing alarms:*
+
+>  You can create a billing almart so that you receive an email as soon as your monthly bill go beyond a certain amount. It's really helpfull if you forgot you had that expensive EC2 instance running, or if you underestimated the pricing of an AWS service.
+
+> For that search for **cloudwatch**, then in the left menu **alarms > billing** and then **create alarm**. Enter an amount at the bottom of  the page, check "create new topic (SNS)" in the next page, enter your email, on the next page enter name and description, then on the last page click create alarm and you're good. The alarm my be in "**insufficient data**" category. If you just created your account and are in free tier, **that's normal.**
+
+>  You can create folders in your S3 bucket.
 
 ## S3 - Simple Storage Service
 
@@ -864,7 +886,7 @@ No SQL database
   - **Strong consistency** (can be enabled) block reads until write applied. **Less than 1 sec**
   - Remember the 1 sec rule, it might be an exam question
 
-DynamoDB, like serverless, can be very expensive at a certain scale. (**3340$ per month** for Aurora vs **39,995$ per month** for DynamoDB)[https://www.abhishek-tiwari.com/dynamodb-or-aurora/]
+DynamoDB, like serverless, can be very expensive at a certain scale. (**3340$ per month** for Aurora vs **39995$ per month** for DynamoDB)[https://www.abhishek-tiwari.com/dynamodb-or-aurora/]
 
 ### DynamoDB Advanced
 
@@ -1314,7 +1336,11 @@ Like simple routing, however you can put health checks on every server, and only
 
 ## VPC
 
-Probably the most important part of the exam
+Probably the most important part of the exam.
+
+**By default, you can have max 5 VPC per Region**.
+
+An instance in a VPC retain its private IP (it does not change).
 
 From aws doc:
 
@@ -1636,4 +1662,526 @@ Finally traffic between regions is **NOT FREE**. It's more expensive than traffi
 
 - Use private IP addresses over public IP addresses to save money. It uses AWS own network rather than internet.
 - If you want to minimize your network costs, put all of your EC2 instances in the same AZ. However that's a single point of failure, something you want to avoid.
+
+## HA architecture (High Availability)
+
+### Load balancer
+
+Load balancer: redistribute the requests to multiple EC2 instance. The number of instance running can increase or decrease according to the load.
+
+Three types of load balancers: 
+
+- **Application load balancers**: best suited for load balancing of HTTP and HTTPS traffic. Operator on layer 7.  They are application aware, so you can do advanced request routing, like sending specified requests to specific web servers.
+- **Network load balancers**: best suited for load balancing of TCP traffic where extreme performance is required. Operate on level 4 so you only have access to IP protocol metadata (not http header or html). capable of handling millions of requests per second, while maintaining ultra-low latencies. **This is expensive**
+- **Classic load balancers**: legacy elastic load balancers. You can load balance http/https apps and use layer 7 specific feature (such as http headers). You can also use info from level 4. It's a bit cheaper. Great for basic load balancing.
+
+**If your app stop responding, ELB responds with a 504 error.** It means the requests to your webserver timed-out.
+
+**X-Forwarded-For** header. Contain the IP address of the client. It's used because the client might be behind a proxy. If you use only info from IP protocol, you would get the address of the proxy. 
+
+You should have at **least two public subnet for your load balancer**. The load balancer will create load balancer instances in the two zones.
+
+When you create an elastic load balancer, you can configure **health checks**. Basically it's an http request sent at regular interval to your EC2 instances to check they are not down. You can configure the path of the GET request. If one of the **health check fails** for an instance, this **instance will be removed from the instance pool** of the ELB. Therefore instances are reported either as **InService** or **OutofService**
+
+**Load balancers have their own DNS name, you are never given an IP address.**
+
+**Target groups**: with application load balancers you can create a conditional redirection, like "if request has this header redirect to...". In that case you might want to redirect your traffic to a target group instead of a single EC2 instance.
+
+You should read the ELB FAQ for Classic Load Balancers.
+
+### Advanced load balancing
+
+#### Sticky sessions
+
+By default two requests from the same users could end up reaching to different EC2 instance because of your load balancer. **Sticky sessions** is a way to tell the load balancer that we want each user to be redirected to the same instance during a browsing session. That's useful when you keep some data in memory in your app for instance.
+
+In the exam, In a scenario where all the traffic go to the same instance, you might want to disable sticky sessions
+
+#### Cross zone Load Balancing
+
+Let's say you are using Route53 to split your traffic in two AZ with each a load balancer. In your first zone you have 4 instances, in the other 1 instance. Your load balancers will split the traffic in their respective zone. So in one zone your four instances will have 12.5% of the total traffic, and in the other zone, your traffic will have 50% of the total traffic. To avoid that we need Cross Zone Load Balancing.
+
+Without Cross zone load balancing. Taken from [here](http://brandedwhitespace.com/ELASTIC_LOAD_BALANCING.html)
+
+![no cross zone load balancing](http://brandedwhitespace.com/ELASTIC_LOAD_BALANCING_files/image003.gif)
+
+**If we enable Cross zone load balancing our load balancer can send traffic to other AZ, and thus better split the charge.** In our example above, every instance will get 20% of total traffic.
+
+#### Path Patterns
+
+You can send some specific url to specific EC2 instances. For instance you can ask your load balancer to redirect all GET `/images/*` requests to a specific EC2 instance, to take advanced of in memory cache. You can use this together with cross zone 
+
+### Autoscaling
+
+Very important for the exam (and for practical use too).
+
+Automatically create new instances to respond to high traffic. Shrink when traffic decrease. Usually used together with load balancing.
+
+- **Groups**: Logical component. (Webserver group for instance)
+- **Configuration templates**: a template for the new instance: the AMI id, instance type, security group, etc...
+- **Scaling options**: How the group will scale. Specific conditions or schedule.
+
+**Scaling options**:
+
+- Maintain current instance levels at all times: **maintain the same number of instance**: If a health check fails, the associated instance is terminated and replaced with a new instance.
+- Scale manually
+- Scale based on a schedule
+- **Scaling on demand** (most popular type): you create a scaling policy (ex: "if cpu goes above 60%, create a new instance")
+- **predictive scaling**: Amazon EC2 Auto Scaling + AWS auto scaling => combine dynamic scaling and predictive scaling. Scale your EC2 instance faster
+
+You can specify the time your instance need to start.
+
+### HA Architecture (High availability)
+
+Always plan for failure.
+
+[https://netflixtechblog.com/the-netflix-simian-army-16e57fbab116](https://netflixtechblog.com/the-netflix-simian-army-16e57fbab116)
+
+- Always design for failure
+- Use multiple AZ's and Multiple Regions where ever you can
+- Know diff between multi AZ (for resilience) vs Read replicas (for performance) for RDS
+- **scaling out:** addding more instances ***VS*** **scaling up**: upgrade instances (t3.micro => t3.large)
+- read questions carefully and always consider the cost element
+- know the different S3 storage classes
+
+### CloudFormation
+
+Cloud formation allow you to create template of AWS infra (VPC + EC2 + loadbalancers, etc...).
+
+You can then run this template on any account, and AWS will create all the necessary instances, vpc, load balancers, etc...
+
+You can also use AWS Quick Start. There is a lot of existing CloudFront formations already out there.
+
+### Elastic beanstalk
+
+Elastic beanstalk can automatically creates autoscaling groups, load balancer, etc...
+
+Elastic beanstalk itself is free, you pay only for the resources it creates.
+
+### High availability bastions
+
+**For production**: SSH client => Network Load Balancer => (bastion 1 in AZ 1  OR  bastion 2 in AZ2) => Private Instance    [EXPENSIVE]
+
+**For dev**: SSH client => Autoscaling group with 1 as minimum and 1 as maximum AND fixed EIP address => Bastion => Instance  [MUCH CHEAPER] but can have some downtime. You need a user script to provision the same EIP to the new host when the other failed
+
+### On-premise service
+
+For the exam you need to know about these services:
+
+- Database Migration Service (DMS)
+  - Allows you to move datases to and from AWS
+  - Might have Disaster recovery env on AWS and on-premise as primary
+  - You use DMS to backup your database on AWS
+  - Support homogenous migrations AND heterogeneous
+- Server Migration Service (SMS)
+  - Allows incremental replication of your on-premises servers  to AWS
+  - can be used as back-up tool, multi-site strategy and DR tool
+- AWS Application Discovery Service
+  - It's a program you install on-premise it maps your datacenter to help you plan migration
+  - Result stored in encrypted format. Can be exported to CSV
+  - Can estimate Total Cost of Ownership
+  - Data also available in AWS Migration Hub
+- VM import/export
+  - Migrate existing applications to EC2
+  - used to create a DR strategy
+  - can export AWS to on-premise
+- Download Amazon Linux 2 as an ISO 
+  - Works with all major virtualization providers
+
+
+
+## Application
+
+**SES**: Simple Email Service
+
+### SQS - Simple Queue Service
+
+Store incoming messages in a queue while they are waiting to be processed
+
+**Example**: You have a meme creation service, that adds text on images. When you have a meme creation request, you store it in SQS. Then the request is processed by a fleet of EC2 instances. When an instance start processing a request, it disapears in the queue. But **if an instance fail and crash, it repears in the queue** => resilient.
+
+SQS is used to **decouple** the different services in your cloud.
+
+SQS => fail-safe queue. Messages can be up to **256KB** of text (any format) (you can go beyond but data will be stored in S3)
+
+You retrieve messages using SQS API.
+
+**Two types of queues**:
+
+- **Standard queues**: **nearly-unlimited number of transactions** per second BUT messages might be **delivered out-of-order** and they **might be delivered TWICE**. However there is still a best-effort so it won't happen too often.
+- **FIFO queues**: Slower than previous option BUT **First-in first-out delivery** and **exactly-once processing**. 
+  - Support messages **groups**: multiple ordered message groups within a single queue
+  - FIFO queues are limited to **300 transactions per second (TPS)** but have all features of standard queues
+
+**Pull-based not pushed-based**: EC2 instances need to check the queue, SQS will not notify then of new messages.
+
+Messages can be kept in queue **from 1minute to 14days.** **Default is 4 days**
+
+**Visibility timeout:** when EC2 instance pick message it becomes invisible in the queue but it still there. If the EC2 instance fail to process the message, **after a visibility timeout** the message become visible in the queue again. If the EC2 instance processed the message in time, then it's deleted from the queue. If the visibility timeout is not carefully choosen, **might result in messages being delivered twice** if processing the message takes longer than the visibility timeout.
+
+**Visibility timeout maximum is 12 hours.**
+
+**SQS guarantees** that your messages will be **processed at least once.**
+
+Two ways to get messages: **long polling** (block until message appears or time-out) and **short polling** (returns immediately even if no messages). Long polling best when queue often empty because charged per poll => cheaper
+
+**In exam; "decouple", "decoupling" your infrastructure == SQS**
+
+### SWF - Simple Workflow Servicce
+
+Just need to now roughly what it is and when use it.
+
+A way to **coordinate** work across **distributed** application **components**.
+
+**Uses cases**: media processing, web application back-ends, business process workflow, and analytics pipelines.
+
+**Designed to coordinate tasks.**
+
+Usually used when a task must be processed by a **mix of executable code**, web service calls **AND human actions** (like moving package from warehouse to delivery truck).
+
+**Used by Amazon in their own warehouse.**
+
+So if there is a **scenario where humans must do a task**, you **can't use SQS** because humans can't read tasks from SQS. **You use SWF**
+
+**SWF vs SQS**:
+
+- SQS has a retention period of up to 14 days; with SWF, workflow executions can last up to 1 year.
+- SWF: **task-oriented API**, SQS: **message-oriented API**
+- SWF: SWF ensures that a task is assigned only once. Never duplicated. With SQS you need to make sure of this yourself 
+- SWF keeps track of all the tasks and events in an applipcation. With SQS you need to implement this yourself
+
+**SWF Actors:**
+
+- **Workflow starters**: initiate a workflow (ex: your e-commerce website creating order)
+- **Deciders**: control flow of activity (decide if the task is done or failed). Decide the steps (what to do next)
+- **Activity workers**: carry out the activity tasks
+
+**Domain = A collection of related workflows**
+
+### SNS - Simple Notification Service
+
+service that makes it easy to send notifications.
+
+Can publish messages and send them to subscribers.
+
+**It can notify through**:
+
+- **push notifications** to mobile phones. compatible with Apple push notification, google firebase, Amazon fire phone, and windows
+- **SMS** - you can send sms
+- **Email** - you can send emails
+- **SQS** - add a message in a queue
+- **Webhook** - you can call a HTTP endpoint
+
+You can **group multiple recipients** using **topics**. People dynamically subscribe to a topic, and when a notification is pushed in the topic, they all receive it.
+
+A **topic can deliver ** to **multiple endpoints types** 
+
+**SNS befenits:**
+
+- Instantaneous, push-based delivery (no polling)
+- simple API, easy integration
+- flexible message delivery over multiple transport protocols
+- Inexpensive, pay as you go
+- web-based AWS management console : simple GUI
+
+**SNS vs SQS**:
+
+- Both messaging services in AWS
+- **SNS** = **push** vs SQS = polls (pulls)
+
+
+
+### Elastic transcoder
+
+Media transcoder in the cloud.
+
+Convert media files from their original source format in to different formats that will play on smartphones, tablets, PCs, etc... (ex: transcode video, converts images, etc..)
+
+All popular formats supported.
+
+You pay based on minutes of transcoding, and resolution of transcoding
+
+
+
+### API Gateway
+
+Entry-point into your AWS environment. Lambda are usually used together with API Gateway.
+
+API gateway helps present various, unrelated services in your AWS cloud as a coherent API.
+
+**What can API gateway do ?**
+
+- Expose HTTPS endpoints to define a RESTful API
+- Servless-ly connect to services like Lambda & DynamoDB
+- Send each API endpoint to a different target
+- Run efficiently with low cost
+- Scale effortlessly
+- Track and control usage by API key
+- Throttle requests to prevent attacks
+- Connect to cloudwatch to log all requests for monitoring
+- maintain mutlple version of your API
+
+
+
+**How do I configure API Gateway?**
+
+- Define an API (container)
+- Define Resources and nested Ressources (URL paths)
+- For each resource
+  - select supported HTTP methods (verbs)
+  - set security
+  - choose target (such as EC2, Lambda, DynamoDB)
+  - set request and response transformations
+
+
+
+**How do you deploy API gateway ?**
+
+- Uses API Gateway domain, by default
+- Can use custom domain
+- Now supports Aws certificate (free SSL/TLS certs)
+
+
+
+**API Caching at API Gateway level** 
+
+Reduce number of calls to your endpoints, improve latency
+
+You specify a TTL in seconds
+
+
+
+**CORS**: Cross-origin resource sharing 
+
+**Error**: "Origin policy cannot be read at the remote resource"; **You need to enable CORS on API Gateway**
+
+
+
+### Kinesis
+
+Handle data streams (thousands of data source sending small data packets (a few KB)).
+
+Examples:
+
+- purchases from online stores (like amazon.com)
+- stock prices
+- Game data
+- Social network data
+- Geospatial data
+- iOT sensor data
+
+Kinesis allows you to load and analyse streaming data
+
+
+
+**3 types**
+
+- **Kinesis streams**.
+  - Producers => **Kinesis streams** (Store data for **24h by default** up to 7 days. Data stored in shards. ) => consumers (EC2 instances)
+  - **shards**: max 5 transactions/sec for reads; maximum total data read rate of 2MB/s, and up to 1000 records/s of writes; maximum total write rate of 1MB/s (including partition keys).
+  - Data capacity of your streams = SUM capacity of shards
+- **Kinesis firehouse**
+  - Producers => **Kinesis Firehouse** [process data on the fly, with for instance lambda function, no persistent storage] => S3
+- **Kinesis analytics**
+  - Can analyse data in Kinesis streams or Kinesis firehouse and send result to S3 or redshift
+
+
+
+### Web identity federation & cognito
+
+Give access to aws resource to user after they authenticate with Amazon, Facebook, Google, etc.. (web id provider)
+
+After authentication, user receives an **authentication code** from Web ID provider, used to get AWS security credentials
+
+Amazon Cognito is a web identity federation with the following features:
+
+- sign-up and sign-in to your apps
+- Access for guest users
+- Acts as an Identity Broker between your app and Web Id providers (no need to write code)
+- Synchronize user data for multiple devices (if user change name)
+- Recommanded for all mobile applications AWS services
+
+
+
+Recommanded approach for Web Identity Federation using social media accounts like Facebook :
+
+- you have AWS resource the user want to access
+- user sign-in with facebook and get auth token
+- user send auth token to cognito
+- cognito will respond with a token (or something) to access AWS resources
+
+
+
+**User pools** = user directory, used to manage sign-up and sign-in functionnality for mobile and web applications. Credentials can be stored in cognito, or cognito can be used as a Identity Broker, and let user sign-in with Facebook/Google account => Successful sign-in generates JSON Web token.
+
+**Identity pools** provide temporary AWS credentials to access AWS services like S3 or DynamoDB
+
+
+
+**User pools != Identity pools**
+
+
+
+1. User ===(crendentials)==> **User pool** ==(credentials)==> Facebook/Google/Amazon
+
+2. User <======(JWT)====== **User pool** <====(token)===== Facebook/Google/Amazon
+
+3. User =======(JWT)======> **Identity pool**
+
+4. User <==(AWS crendentials)== **Identity pool** (grant IAM role)
+5. User ==(AWS credentials + request)==> AWS resource
+
+
+
+**If user change email, or password => silent notification sent to all devices used to login** (so they are all in sync)
+
+## Security
+
+You can use host-based firewall (like iptables on linux) to block ip from attackers in your EC2 instances.
+
+However  if behind load balancer, doesn't work because IP lost (request have ip of load balancer) (Well exept if load balancer is Network Load balancer, but expensive).
+
+So you can use NACL to block IPs, but can be hard to maintain a list.
+
+**WAF**: Web application firewall. Protect application from online threats
+
+WAF is at layer 7, so it can detect SQL injections, XSS, etc...
+
+- Can be attached to ALB (Application load balancer). 
+- Can be attached to CloudFront (important because in that case NACL don't see IP from attacker)
+
+### KMS
+
+⚠️ **I didn't take much notes in this part**
+
+- **REGIONAL** secure key management and encryption and decryption
+- Manages **customer master keys** (CMKs)
+- Ideal for S3 objects, database passwords and API keys stored in Systems Manager Parameter Store
+- Encrypt and decrypt data up to 4KB
+- Integrated with most AWS services
+- Pay per API call
+- Audit capability using CloudTrail - logs delivered to S3
+- **FIPS 140-2 Level 2**
+- Level 3 is CloudHSM
+
+**Types of CMKs**
+
+- AWS managed CMK
+- Customer Managed CMK
+- AWS Owned CMK: you usually won't see those
+
+
+
+You can create Key policies to control who has access to your keys. By default Admin has access to keys, let it this way.
+
+Each AWS service for which you have encryption enable has its own key (S3, SNS, etc..)
+
+### CloudHSM
+
+**Dedicated hardware security module** (HSM)
+
+**FIPS 140-2 Level 3 ==> CloudHSM**
+
+FIPS 140-2 Level 2 ==> KSM is enough
+
+Manage your own keys
+
+No access to the AWS-managed component
+
+Runs within a VPC in your account
+
+Single tenant, dedicated hardware, multi-AZ cluster
+
+Industy-standard APIs = AWS APIs
+
+PKCS#11, Java Cryptography Extension (JCE), Microsoft CryptoNG CNG)
+
+Keep your keys safe - irretrievable if lost
+
+
+
+### Systems Manager Parameter Store
+
+Systems Manager Parameter Store is a component of AWS Systems Manager. (**SSM**)
+
+This is the perfect place to store the configuration of your EC2 instances
+
+You can securely store your db passwords for instance
+
+Secrects can be encrypted using KMS
+
+Separate data from source control
+
+You can store parameters in hierarchies (up to 15 levels deep) and track versions
+
+You can set TTL to expire passwords
+
+
+
+## Serverless
+
+Already know that part so not taking much notes
+
+You can run lambda functions: 
+
+- When an AWS event is triggered (data dropped in S3 bucket, or in DynamoDB table). There is a lot of triggers available
+- When you receive a request through the API Gateway
+
+Don't need to worry about infrastructure, load balancing, EC2 instances, security patches, autoscaling
+
+You just write code.
+
+If you have 1 request per month you pay only for that request (less than one cent) instead of at least 1 EC2 instance.
+
+Charged on the number of requests (0.2$ per million) + lambda duration + API Gateway (1$ per million)
+
+A lambda function can trigger a lambda function.
+
+**AWS X-ray allows you to debug lambda**
+
+Lambda can do things globally, you can use it to back up S3 buckets to other S3 buckets etc
+
+You need to know the lambda triggers
+
+**Lambdas support multi-threading.**
+
+### Serverless Application Model (SAM)
+
+A CloudFormation extension optimized for serverless applications
+
+
+
+### ECS - Elastic Container Service
+
+That's a really interesting service. It's a middle-ground service between EC2 and serverless.
+
+- ECS is a service that manage (orchestrate) **clusters** of **containers**.
+
+- ECS manages **EC2 instances** or **Fargate instances**
+
+- ECS integrates with VPC, security groups, EBS volume, ELB, CloudTrail, CloudWatch, etc...
+
+
+
+**Fargate** is a **serverless container engine** : you don't need to manage EC2 instances
+
+Specify and pay for resources per application
+
+So you might prefer Fargate. Cases where you must use EC2:
+
+- Compliance requirements
+- Broader customiation than fargate
+- require GPU
+
+**EKS**:  Elastic Kubernetes Service (same goals as ECS but no vendor-lockin)
+
+**ECR** - Elastic Container Registry: Store manage, deploy images. integrated with ECS and EKS; you pay for storage and data transfer
+
+**ECS** integrates with ELB
+
+**Task Role** vs **EC2 instance Role** (applied to all tasks running in instance)
+
+
+
+**Clusters** contain **services** which contain **tasks** which contain **containers definitions** (your docker containers)
 
